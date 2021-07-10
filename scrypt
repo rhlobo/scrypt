@@ -1,0 +1,152 @@
+#! /bin/bash
+
+
+# VARIABLES ###################################################################
+_USER=${SUDO_USER}
+_HOME=$(eval echo ~${_USER})
+_KEYDIR="${_HOME}/.scrypt"
+
+
+# FUNCTION DEFINITION #########################################################
+# Displays help message
+display_help(){
+    local MESSAGE=$1
+    [ ! -z "${MESSAGE}" ] && echo "${MESSAGE}"
+    cat <<EOF
+
+    Usage:  $0 KEYNAME setup|test|encrypt|decrypt
+
+            $0 KEYNAME encrypt|decrypt [filename]
+            When no data is being piped, checks for filename argument.
+EOF
+}
+
+# Displays error message
+display_error(){
+    cat <<< "ERROR: $@" 1>&2;
+}
+
+
+# PARSE CLI ARGUMENTS #########################################################
+# setup <name>
+_NAME=$1
+_COMMAND=$2
+_OPTIONAL_FILE=$3
+
+
+[ -z "${_NAME}" ] && {
+    display_help "obligatory key 'name' parameter is missing."
+    exit 1
+} || _KEYFILE="${_KEYDIR}/${_NAME}.scryptkey"
+
+
+case $_COMMAND in
+setup|test|encrypt|decrypt)
+;;
+*)
+    display_help "Unrecognized command."
+    exit 1
+;;
+esac
+
+
+# CHECK DEPENDENCIES ##########################################################
+# sshcrypt
+which sshcrypt &> /dev/null || {
+    display_help "sshcrypt not found in PATH."
+    exit 1
+}
+
+
+# MAIN ########################################################################
+[[ "${_COMMAND}" == "setup" ]] && {
+    # Assure masterkey existence
+    test -f "${_KEYFILE}" || {
+        echo "Creating KEYFILE ${_KEYFILE}"
+        mkdir -p "${_KEYDIR}"
+        tr -dc 'A-Za-z0-9!"#$%&'\''()*+,-./:;<=>?@[\]^_`{|}~' < /dev/urandom | head -c 64 | sshcrypt agent-encrypt > "${_KEYFILE}" || {
+            display_help "FAILED TO CREATE KEY ${_NAME}."
+            cat "${_KEYFILE}"
+            rm -f "${_KEYFILE}"
+            exit 1
+        }
+    }
+}
+
+[[ "${_COMMAND}" == "test" ]] && {
+    # Check (encrypted) keyfile existence
+    test -f "${_KEYFILE}" || {
+        display_error "Encrypted keyfile not found."
+        exit 1
+    }
+
+    # Verify sshcrypt sshkey
+    sshcrypt agent-decrypt < ${_KEYFILE} &> /dev/null || {
+        display_error "Could not encrypt/decrypt... Does ssh-agent have the identity loaded?"
+        exit 1
+    }
+
+    tr -dc 'A-Za-z0-9!"#$%&'\''()*+,-./:;<=>?@[\]^_`{|}~' < /dev/urandom | head -c 64 | sshcrypt encrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})" | sshcrypt decrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})" && {
+        echo "Keyfile is ok!"
+        exit 0
+    } || {
+        display_error "Could not encrypt/decrypt... Using the correct key?"
+        exit 1
+    }
+}
+
+[[ "${_COMMAND}" == "encrypt" ]] && {
+    # Check (encrypted) keyfile existence
+    test -f "${_KEYFILE}" || {
+        display_error "Encrypted keyfile not found."
+        exit 1
+    }
+
+    # Verify sshcrypt sshkey
+    sshcrypt agent-decrypt < ${_KEYFILE} &> /dev/null || {
+        display_error "Could not encrypt/decrypt... Does ssh-agent have the identity loaded?"
+        exit 1
+    }
+
+    # Check to see if a pipe exists on stdin.
+    if [ -p /dev/stdin ]; then
+        cat | sshcrypt encrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})" || {
+            display_error "Could not encrypt/decrypt... Using the correct key?"
+            exit 1
+        }
+    else
+        # Checking to ensure a filename was specified and that it exists
+        if [ -f "${_OPTIONAL_FILE}" ]; then
+            cat ${_OPTIONAL_FILE} | sshcrypt encrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})" || {
+                display_error "Could not encrypt/decrypt... Using the correct key?"
+                exit 1
+            }
+        else
+            display_error "No input given! Nothing was piped and no filename was provided..."
+            exit 1
+        fi
+    fi
+}
+
+[[ "${_COMMAND}" == "decrypt" ]] && {
+    # Verify sshcrypt sshkey
+    sshcrypt agent-decrypt < ${_KEYFILE} &> /dev/null || {
+        display_error "Could not encrypt/decrypt... Does ssh-agent have the identity loaded?"
+        exit 1
+    }
+
+    # Check to see if a pipe exists on stdin.
+    if [ -p /dev/stdin ]; then
+        cat | sshcrypt decrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})"
+    else
+        # Checking to ensure a filename was specified and that it exists
+        if [ -f "${_OPTIONAL_FILE}" ]; then
+            cat ${_OPTIONAL_FILE} | sshcrypt decrypt -p "$(sshcrypt agent-decrypt < ${_KEYFILE})"
+        else
+            display_error "No input given! Nothing was piped and no filename was provided..."
+            exit 1
+        fi
+    fi
+}
+
+exit 0

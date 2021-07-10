@@ -1,0 +1,96 @@
+#! /bin/bash
+
+
+# VARIABLES ###################################################################
+_USER=${SUDO_USER}
+_HOME=$(eval echo ~${_USER})
+_KEYDIR="${_HOME}/.scrypt"
+
+# Set path variables
+_CURRDIR="$(pwd)"
+_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$_SOURCE" ]; do
+  _BASEDIR="$( cd -P "$( dirname "$_SOURCE" )" >/dev/null 2>&1 && pwd )"
+  _SOURCE="$(readlink "$_SOURCE")"
+  [[ $_SOURCE != /* ]] && _SOURCE="$_BASEDIR/$_SOURCE"
+done
+_BASEDIR="$( cd -P "$( dirname "$_SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+
+# FUNCTION DEFINITION #########################################################
+# Displays help message
+display_help(){
+    local MESSAGE=$1
+    [ ! -z "${MESSAGE}" ] && echo "${MESSAGE}"
+    cat <<EOF
+
+    Usage:  $0 <keyname> COMMAND OPTIONS...
+
+            For command and option reference,
+            see libsecret's secret-tool docs.
+EOF
+}
+
+# Displays error message
+display_error(){
+    cat <<< "ERROR: $@" 1>&2;
+}
+
+
+# PARSE CLI ARGUMENTS #########################################################
+_NAME=$1
+_COMMAND=$2
+
+# Name parameter
+[ -z "${_NAME}" ] && {
+    display_help "Obligatory key 'name' parameter is missing."
+    exit 1
+}
+
+# Command parameter
+case $_COMMAND in
+    store|lookup|clear|search)
+        ;;
+    *)
+        display_error "Command not recognized."
+        exit 1
+        ;;
+esac
+
+
+# CHECK DEPENDENCIES ##########################################################
+# sshcrypt
+which sshcrypt &> /dev/null || {
+    display_help "sshcrypt not found in PATH."
+    exit 1
+}
+
+## keyfile
+_KEYFILE="${_KEYDIR}/${_NAME}.scryptkey"
+test -f "${_KEYFILE}" || {
+    display_error "Keyfile not found for '${_NAME}'."
+    exit 1
+}
+
+# MAIN ########################################################################
+
+[[ "${_COMMAND}" == "store" ]] && {
+    cat | "${_BASEDIR}/scrypt" "${_NAME}" encrypt | secret-tool "${@:2}" || exit 1
+}
+
+[[ "${_COMMAND}" == "lookup" ]] && {
+    secret-tool "${@:2}" | "${_BASEDIR}/scrypt" "${_NAME}" decrypt 2> /dev/null || {
+        display_error "Lookup FAILED... bad lookup params?"
+        exit 1
+    }
+}
+
+[[ "${_COMMAND}" == "clear" ]] && {
+    secret-tool "${@:2}" || exit 1
+}
+
+[[ "${_COMMAND}" == "search" ]] && {
+    secret-tool "${@:2}" || exit 1
+}
+
+exit 0
