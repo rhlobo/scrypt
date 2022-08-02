@@ -2,7 +2,8 @@
 
 
 # VARIABLES ###################################################################
-_USER=${SUDO_USER}
+#_USER=${SUDO_USER}
+_USER="${SUDO_USER:-$(logname)}"
 _HOME=$(eval echo ~${_USER})
 _KEYDIR="${_HOME}/.scrypt"
 
